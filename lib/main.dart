@@ -48,69 +48,36 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
     _files = List<String>();
     _running = false;
-    _readAssets().then((bins) {
-      _fileBinaries = bins;
-      setState(() {
-        _fileResults = Map<String, List<Tuple2<int, int>>>();
-        for (String file in _files) {
-          _fileResults[file] = List<Tuple2<int, int>>();
-        }
-      });
-    });
+    _fileResults = Map<String, List<Tuple2<int, int>>>();
+    _readAssets();
   }
 
-  Future<Map<String, Uint8List>> _readAssets() async {
+  Future<void> _readAssets() async {
     AssetBundle bundle = DefaultAssetBundle.of(context);
     Map<String, dynamic> manifestMap = jsonDecode(
         await bundle.loadString('AssetManifest.json')
     );
     _files = manifestMap.keys.toList();
 
-    Map<String, Uint8List> ret = Map<String, Uint8List>();
+    _fileBinaries = Map<String, Uint8List>();
     for (String file in _files) {
-      ret[file] = (await bundle.load(file))
+      _fileBinaries[file] = (await bundle.load(file))
           .buffer.asUint8List();
     }
-    return ret;
   }
 
   void _runPerformanceTest() async {
     setState(() {
-      _fileResults.keys.forEach((key) {
-        _fileResults[key].clear();
-      });
+      _fileResults.clear();
       _running = true;
     });
-    // Without timer UI will be blocked. Dirty solution but 2 seconds should
-    // be enough to run build() on every device
-    Timer(Duration(seconds: 2), () {
-      int iterations = 10;
-      String encoded;
-      Uint8List binary;
-      for (int i = 0; i < iterations; i++) {
-        for (String file in _files) {
-          binary = _fileBinaries[file];
-          int startTimestamp = DateTime
-              .now()
-              .microsecondsSinceEpoch;
-          encoded = base64Encode(binary);
-          int encodedTimestamp = DateTime
-              .now()
-              .microsecondsSinceEpoch;
-          base64Decode(encoded);
-          int endTimestamp = DateTime
-              .now()
-              .microsecondsSinceEpoch;
-          int encodingTime = encodedTimestamp - startTimestamp;
-          int decodingTime = endTimestamp - encodedTimestamp;
-          print("Encoding $file took $encodingTimeµs");
-          print("Decoding $file took $decodingTimeµs");
-          _fileResults[file].add(Tuple2<int, int>(encodingTime, decodingTime));
-        }
-      }
-      setState(() {
-        _running = false;
-      });
+    Map<String, List<Tuple2<int, int>>> result = await compute(
+        testPerformance,
+        _fileBinaries
+    );
+    setState(() {
+      _fileResults = result;
+      _running = false;
     });
   }
 
@@ -130,7 +97,7 @@ class _MyHomePageState extends State<MyHomePage> {
     for (String file in _files) {
       ret.add(Text('$file file average:'));
       String value;
-      if (_fileResults[file].isEmpty) {
+      if (_fileResults.isEmpty) {
         value = 'Waiting...';
       } else {
         value = _getAverages(_fileResults[file]);
@@ -163,4 +130,38 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
+}
+
+Future<Map<String, List<Tuple2<int, int>>>> testPerformance(Map<String, Uint8List> binaries) async {
+  Map<String, List<Tuple2<int, int>>> ret = Map<String, List<Tuple2<int, int>>>();
+  binaries.keys.forEach((key) {
+    ret[key] = List<Tuple2<int, int>>();
+  });
+
+  int iterations = 100;
+  String encoded;
+  Uint8List binary;
+  for (int i = 0; i < iterations; i++) {
+    for (String file in binaries.keys) {
+      binary = binaries[file];
+      int startTimestamp = DateTime
+          .now()
+          .microsecondsSinceEpoch;
+      encoded = base64Encode(binary);
+      int encodedTimestamp = DateTime
+          .now()
+          .microsecondsSinceEpoch;
+      base64Decode(encoded);
+      int endTimestamp = DateTime
+          .now()
+          .microsecondsSinceEpoch;
+      int encodingTime = encodedTimestamp - startTimestamp;
+      int decodingTime = endTimestamp - encodedTimestamp;
+      print("Encoding $file took $encodingTimeµs");
+      print("Decoding $file took $decodingTimeµs");
+      ret[file].add(Tuple2<int, int>(encodingTime, decodingTime));
+    }
+  }
+
+  return ret;
 }
